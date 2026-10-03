@@ -7,7 +7,7 @@ spec:
   predictor:
     containers:
     - name: kserve-container
-      image: ghcr.io/sraviauniverse/ticket-triage-api:a1b2c3d4
+      image: ghcr.io/sraviauniverse/ticket-triage-api:0a12d857
       ports:
       - containerPort: 8000
       resources:
