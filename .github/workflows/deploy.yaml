@@ -1,0 +1,52 @@
+name: build-and-deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set image tag
+        run: echo "IMAGE_TAG=${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build image
+        run: docker build -t ghcr.io/sraviauniverse/ticket-triage-api:${IMAGE_TAG} build_context
+
+      - name: Push image
+        run: docker push ghcr.io/sraviauniverse/ticket-triage-api:${IMAGE_TAG}
+
+      - name: Update deployment manifest
+        run: |
+          pip install pyyaml
+          python ci/update_manifest.py k8s/inference-service.yaml ${IMAGE_TAG}
+
+      - name: Commit updated manifest
+        run: |
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@example.com"
+          git commit -am "Deploy ${IMAGE_TAG}" || echo "Nothing to commit"
+          git push
+
+      - name: Run the image and smoke test it
+        run: |
+          docker run -d -p 8000:8000 --name smoke-test ghcr.io/sraviauniverse/ticket-triage-api:${IMAGE_TAG}
+          for i in $(seq 1 10); do
+            curl -sf http://localhost:8000/healthz && break
+            sleep 2
+          done
+          curl -sf http://localhost:8000/healthz
+          echo
+          curl -sf -X POST http://localhost:8000/v1/models/ticket-triage-model:predict -H "Content-Type: application/json" -d '{"instances": [{"description_length": 120, "affected_users": 3, "previous_tickets": 1}]}'
+          docker logs smoke-test
+          docker rm -f smoke-test
